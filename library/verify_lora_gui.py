@@ -8,7 +8,7 @@ from .common_gui import (
     get_file_path,
 )
 
-PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
+#PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
 folder_symbol = '\U0001f4c2'  # 📂
 refresh_symbol = '\U0001f504'  # 🔄
 save_style_symbol = '\U0001f4be'  # 💾
@@ -28,15 +28,14 @@ def verify_lora(
         msgbox('The provided model A is not a file')
         return
 
-    run_cmd = [
-        PYTHON,
-        os.path.join('networks', 'check_lora_weights.py'),
-        f'{lora_model}',
-    ]
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'python "networks/check_lora_weights.py"'
+    run_cmd += f' {lora_model}'
 
     print(' '.join(run_cmd))
 
     # Run the command
+    subprocess.run(run_cmd, shell=True)
     process = subprocess.Popen(
         run_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )

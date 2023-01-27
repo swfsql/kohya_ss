@@ -448,7 +448,8 @@ def train_model(
     lr_warmup_steps = round(float(int(lr_warmup) * int(max_train_steps) / 100))
     print(f'lr_warmup_steps = {lr_warmup_steps}')
 
-    run_cmd = f'accelerate launch --num_cpu_threads_per_process={num_cpu_threads_per_process} "train_network.py"'
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'accelerate launch --num_cpu_threads_per_process={num_cpu_threads_per_process} "train_network.py"'
 
     # run_cmd += f' --caption_dropout_rate="0.1" --caption_dropout_every_n_epochs=1'   # --random_crop'
 
@@ -905,7 +906,7 @@ def lora_tab(
         gradio_verify_lora_tab()
 
     button_run = gr.Button('Train model', variant='primary')
-    
+
     button_print = gr.Button('Print training command')
 
     # Setup gradio tensorboard buttons
@@ -998,7 +999,7 @@ def lora_tab(
         outputs=[config_file_name] + settings_list + [LoCon_row],
         show_progress=False,
     )
-    
+
     button_load_config.click(
         open_configuration,
         inputs=[dummy_db_false, config_file_name] + settings_list,
@@ -1025,7 +1026,7 @@ def lora_tab(
         inputs=[dummy_db_false] + settings_list,
         show_progress=False,
     )
-    
+
     button_print.click(
         train_model,
         inputs=[dummy_db_true] + settings_list,

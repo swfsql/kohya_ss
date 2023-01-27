@@ -4,7 +4,7 @@ import subprocess
 import os
 from .common_gui import get_folder_path, add_pre_postfix
 
-PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
+#PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
 
 
 def caption_images(
@@ -27,7 +27,8 @@ def caption_images(
         return
 
     print(f'GIT captioning files in {train_data_dir}...')
-    run_cmd = f'.\\venv\\Scripts\\python.exe "finetune/make_captions_by_git.py"'
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'python "finetune/make_captions.py"'
     if not model_id == '':
         run_cmd += f' --model_id="{model_id}"'
     run_cmd += f' --batch_size="{int(batch_size)}"'

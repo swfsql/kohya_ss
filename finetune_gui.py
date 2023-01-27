@@ -34,7 +34,7 @@ refresh_symbol = '\U0001f504'  # 🔄
 save_style_symbol = '\U0001f4be'  # 💾
 document_symbol = '\U0001F4C4'   # 📄
 
-PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
+#PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
 
 
 def save_configuration(
@@ -315,7 +315,11 @@ def train_model(
         if not os.path.exists(train_dir):
             os.mkdir(train_dir)
 
-        run_cmd = f'{PYTHON} finetune/merge_captions_to_metadata.py'
+        run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+        run_cmd += f"source {os.environ['ROOT']}/kohya_venv/bin/activate; "
+        run_cmd += (
+            f'python finetune/merge_captions_to_metadata.py'
+        )
         if caption_extension == '':
             run_cmd += f' --caption_extension=".caption"'
         else:
@@ -331,11 +335,13 @@ def train_model(
         if os.name == 'posix':
             os.system(run_cmd)
         else:
-            subprocess.run(run_cmd)
+            subprocess.run(run_cmd, shell=True)
 
     # create images buckets
     if generate_image_buckets:
-        run_cmd = f'{PYTHON} finetune/prepare_buckets_latents.py'
+        run_cmd = (
+            f'python finetune/prepare_buckets_latents.py'
+        )
         run_cmd += f' "{image_folder}"'
         run_cmd += f' "{train_dir}/{caption_metadata_filename}"'
         run_cmd += f' "{train_dir}/{latent_metadata_filename}"'
@@ -356,7 +362,7 @@ def train_model(
         if os.name == 'posix':
             os.system(run_cmd)
         else:
-            subprocess.run(run_cmd)
+            subprocess.run(run_cmd, shell=True)
 
     image_num = len(
         [
@@ -384,7 +390,8 @@ def train_model(
     lr_warmup_steps = round(float(int(lr_warmup) * int(max_train_steps) / 100))
     print(f'lr_warmup_steps = {lr_warmup_steps}')
 
-    run_cmd = f'accelerate launch --num_cpu_threads_per_process={num_cpu_threads_per_process} "./fine_tune.py"'
+    f"{os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'accelerate launch --num_cpu_threads_per_process={num_cpu_threads_per_process} "./fine_tune.py"'
     if v2:
         run_cmd += ' --v2'
     if v_parameterization:
@@ -479,7 +486,7 @@ def train_model(
     if os.name == 'posix':
         os.system(run_cmd)
     else:
-        subprocess.run(run_cmd)
+        subprocess.run(run_cmd, shell=True)
 
     # check if output_dir/last is a folder... therefore it is a diffuser model
     last_dir = pathlib.Path(f'{output_dir}/{output_name}')

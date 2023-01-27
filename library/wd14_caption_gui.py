@@ -21,7 +21,8 @@ def caption_images(train_data_dir, caption_extension, batch_size, thresh, replac
         return
 
     print(f'Captioning files in {train_data_dir}...')
-    run_cmd = f'accelerate launch "./finetune/tag_images_by_wd14_tagger.py"'
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'accelerate launch "./finetune/tag_images_by_wd14_tagger.py"'
     run_cmd += f' --batch_size="{int(batch_size)}"'
     run_cmd += f' --thresh="{thresh}"'
     run_cmd += f' --replace_underscores' if replace_underscores else ''
@@ -35,7 +36,7 @@ def caption_images(train_data_dir, caption_extension, batch_size, thresh, replac
     if os.name == 'posix':
         os.system(run_cmd)
     else:
-        subprocess.run(run_cmd)
+        subprocess.run(run_cmd, shell=True)
 
     print('...captioning done')
 
@@ -76,7 +77,7 @@ def gradio_wd14_caption_gui_tab():
             batch_size = gr.Number(
                 value=1, label='Batch size', interactive=True
             )
-            
+
             replace_underscores = gr.Checkbox(
                 label='Replace underscores in filenames with spaces',
                 value=False,

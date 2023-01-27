@@ -28,7 +28,8 @@ def caption_images(
         print(
             f'Captioning files in {images_dir_input} with {caption_text_input}...'
         )
-        run_cmd = f'python "tools/caption.py"'
+        run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+        run_cmd += f'python "tools/caption.py"'
         run_cmd += f' --caption_text="{caption_text_input}"'
         if overwrite_input:
             run_cmd += f' --overwrite'
@@ -42,7 +43,7 @@ def caption_images(
         if os.name == 'posix':
             os.system(run_cmd)
         else:
-            subprocess.run(run_cmd)
+            subprocess.run(run_cmd, shell=True)
 
     if overwrite_input:
         if not prefix == '' or not postfix == '':

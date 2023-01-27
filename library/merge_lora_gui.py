@@ -12,7 +12,7 @@ folder_symbol = '\U0001f4c2'  # 📂
 refresh_symbol = '\U0001f504'  # 🔄
 save_style_symbol = '\U0001f4be'  # 💾
 document_symbol = '\U0001F4C4'   # 📄
-PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
+#PYTHON = 'python3' if os.name == 'posix' else './venv/Scripts/python.exe'
 
 
 def merge_lora(
@@ -44,7 +44,8 @@ def merge_lora(
     ratio_a = ratio
     ratio_b = 1 - ratio
 
-    run_cmd = f'{PYTHON} "{os.path.join("networks","merge_lora.py")}"'
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += f'python "networks/merge_lora.py"'
     run_cmd += f' --save_precision {save_precision}'
     run_cmd += f' --precision {precision}'
     run_cmd += f' --save_to "{save_to}"'
@@ -57,7 +58,7 @@ def merge_lora(
     if os.name == 'posix':
         os.system(run_cmd)
     else:
-        subprocess.run(run_cmd)
+        subprocess.run(run_cmd, shell=True)
 
 
 ###
