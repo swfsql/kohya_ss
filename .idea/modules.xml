@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/kohya_ss.iml" filepath="$PROJECT_DIR$/.idea/kohya_ss.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../kohya_ss-docker/.idea/kohya_ss-docker.iml" filepath="$PROJECT_DIR$/../kohya_ss-docker/.idea/kohya_ss-docker.iml" />
     </modules>
   </component>
 </project>

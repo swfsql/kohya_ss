@@ -218,6 +218,7 @@ def train(args):
     # train==True is required to enable gradient_checkpointing
     if args.gradient_checkpointing or global_step < args.stop_text_encoder_training:
       text_encoder.train()
+      text_encoder.text_model.embeddings.requires_grad_(True)
 
     for step, batch in enumerate(train_dataloader):
       # 指定したステップ数でText Encoderの学習を止める
