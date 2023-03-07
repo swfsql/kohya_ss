@@ -5,7 +5,7 @@ import subprocess
 import time
 
 tensorboard_proc = None   # I know... bad but heh
-TENSORBOARD = 'tensorboard' if os.name == 'posix' else 'tensorboard.exe'
+#TENSORBOARD = 'tensorboard' if os.name == 'posix' else 'tensorboard.exe'
 
 
 def start_tensorboard(logging_dir):
@@ -16,7 +16,8 @@ def start_tensorboard(logging_dir):
         msgbox(msg='Error: log folder is empty')
         return
 
-    run_cmd = [f'{TENSORBOARD}', '--logdir', f'{logging_dir}']
+    run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
+    run_cmd += [f'tensorboard', '--logdir', f'{logging_dir}']
 
     print(run_cmd)
     if tensorboard_proc is not None:
