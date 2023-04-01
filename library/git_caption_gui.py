@@ -28,7 +28,7 @@ def caption_images(
 
     print(f'GIT captioning files in {train_data_dir}...')
     run_cmd = f". {os.environ['ROOT']}/kohya_venv/bin/activate; "
-    run_cmd += f'python "finetune/make_captions.py"'
+    run_cmd += f'python "finetune/make_captions_by_git.py"'
     if not model_id == '':
         run_cmd += f' --model_id="{model_id}"'
     run_cmd += f' --batch_size="{int(batch_size)}"'

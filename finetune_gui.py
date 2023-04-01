@@ -20,6 +20,7 @@ from library.common_gui import (
     run_cmd_training,
     # set_legacy_8bitadam,
     update_my_data,
+    check_if_model_exist,
 )
 from library.tensorboard_gui import (
     gradio_tensorboard,
@@ -102,7 +103,10 @@ def save_configuration(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -214,15 +218,18 @@ def open_configuration(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
-    
+
     ask_for_file = True if ask_for_file.get('label') == 'True' else False
 
     original_file_path = file_path
-    
+
     if ask_for_file:
         file_path = get_file_path(file_path)
 
@@ -308,8 +315,14 @@ def train_model(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
+    if check_if_model_exist(output_name, output_dir, save_model_as):
+        return
+
     # create caption json file
     if generate_caption_database:
         if not os.path.exists(train_dir):
@@ -367,8 +380,10 @@ def train_model(
     image_num = len(
         [
             f
-            for f in os.listdir(image_folder)
-            if f.endswith('.jpg') or f.endswith('.png') or f.endswith('.webp')
+            for f, lower_f in (
+                (file, file.lower()) for file in os.listdir(image_folder)
+            )
+            if lower_f.endswith(('.jpg', '.jpeg', '.png', '.webp'))
         ]
     )
     print(f'image_num = {image_num}')
@@ -470,6 +485,8 @@ def train_model(
         caption_dropout_rate=caption_dropout_rate,
         noise_offset=noise_offset,
         additional_parameters=additional_parameters,
+        vae_batch_size=vae_batch_size,
+        min_snr_gamma=min_snr_gamma,
     )
 
     run_cmd += run_cmd_sample(
@@ -684,7 +701,10 @@ def finetune_tab():
                 bucket_reso_steps,
                 caption_dropout_every_n_epochs,
                 caption_dropout_rate,
-                noise_offset,additional_parameters,
+                noise_offset,
+                additional_parameters,
+                vae_batch_size,
+                min_snr_gamma,
             ) = gradio_advanced_training()
             color_aug.change(
                 color_aug_changed,
@@ -777,7 +797,10 @@ def finetune_tab():
         sample_every_n_steps,
         sample_every_n_epochs,
         sample_sampler,
-        sample_prompts,additional_parameters,
+        sample_prompts,
+        additional_parameters,
+        vae_batch_size,
+        min_snr_gamma,
     ]
 
     button_run.click(train_model, inputs=settings_list)
@@ -788,7 +811,7 @@ def finetune_tab():
         outputs=[config_file_name] + settings_list,
         show_progress=False,
     )
-    
+
     button_load_config.click(
         open_configuration,
         inputs=[dummy_db_false, config_file_name] + settings_list,

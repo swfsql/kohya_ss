@@ -1,7 +1,8 @@
 from tkinter import filedialog, Tk
+from easygui import msgbox
 import os
 import gradio as gr
-from easygui import msgbox
+import easygui
 import shutil
 
 folder_symbol = '\U0001f4c2'  # 📂
@@ -30,38 +31,74 @@ V1_MODELS = [
 # define a list of substrings to search for
 ALL_PRESET_MODELS = V2_BASE_MODELS + V_PARAMETERIZATION_MODELS + V1_MODELS
 
+FILE_ENV_EXCLUSION = ['COLAB_GPU', 'RUNPOD_POD_ID']
+
+
+def check_if_model_exist(output_name, output_dir, save_model_as):
+    if save_model_as in ['diffusers', 'diffusers_safetendors']:
+        ckpt_folder = os.path.join(output_dir, output_name)
+        if os.path.isdir(ckpt_folder):
+            msg = f'A diffuser model with the same name {ckpt_folder} already exists. Do you want to overwrite it?'
+            if not easygui.ynbox(msg, 'Overwrite Existing Model?'):
+                print(
+                    'Aborting training due to existing model with same name...'
+                )
+                return True
+    elif save_model_as in ['ckpt', 'safetensors']:
+        ckpt_file = os.path.join(output_dir, output_name + '.' + save_model_as)
+        if os.path.isfile(ckpt_file):
+            msg = f'A model with the same file name {ckpt_file} already exists. Do you want to overwrite it?'
+            if not easygui.ynbox(msg, 'Overwrite Existing Model?'):
+                print(
+                    'Aborting training due to existing model with same name...'
+                )
+                return True
+    else:
+        print(
+            'Can\'t verify if existing model exist when save model is set a "same as source model", continuing to train model...'
+        )
+        return False
+
+    return False
+
 
 def update_my_data(my_data):
-    if my_data.get('use_8bit_adam', False) == True:
-        my_data['optimizer'] = 'AdamW8bit'
-        # my_data['use_8bit_adam'] = False
+    # Update the optimizer based on the use_8bit_adam flag
+    use_8bit_adam = my_data.get('use_8bit_adam', False)
+    my_data.setdefault('optimizer', 'AdamW8bit' if use_8bit_adam else 'AdamW')
 
-    if (
-        my_data.get('optimizer', 'missing') == 'missing'
-        and my_data.get('use_8bit_adam', False) == False
-    ):
-        my_data['optimizer'] = 'AdamW'
-
-    if my_data.get('model_list', 'custom') == []:
-        print('Old config with empty model list. Setting to custom...')
+    # Update model_list to custom if empty or pretrained_model_name_or_path is not a preset model
+    model_list = my_data.get('model_list', [])
+    pretrained_model_name_or_path = my_data.get('pretrained_model_name_or_path', '')
+    if not model_list or pretrained_model_name_or_path not in ALL_PRESET_MODELS:
         my_data['model_list'] = 'custom'
 
-    # If Pretrained model name or path is not one of the preset models then set the preset_model to custom
-    if not my_data.get('pretrained_model_name_or_path', '') in ALL_PRESET_MODELS:
-        my_data['model_list'] = 'custom'
-    
-    # Fix old config files that contain epoch as str instead of int
+    # Convert epoch and save_every_n_epochs values to int if they are strings
     for key in ['epoch', 'save_every_n_epochs']:
         value = my_data.get(key, -1)
-        if type(value) == str:
-            if value != '':
-                my_data[key] = int(value)
-            else:
-                my_data[key] = -1
-                
+        if isinstance(value, str) and value.isdigit():
+            my_data[key] = int(value)
+        elif not value:
+            my_data[key] = -1
+
+    # Update LoRA_type if it is set to LoCon
     if my_data.get('LoRA_type', 'Standard') == 'LoCon':
         my_data['LoRA_type'] = 'LyCORIS/LoCon'
-        
+
+    # Update model save choices due to changes for LoRA and TI training
+    if (
+        (my_data.get('LoRA_type') or my_data.get('num_vectors_per_token'))
+        and my_data.get('save_model_as') not in ['safetensors', 'ckpt']
+    ):
+        message = (
+            'Updating save_model_as to safetensors because the current value in the config file is no longer applicable to {}'
+        )
+        if my_data.get('LoRA_type'):
+            print(message.format('LoRA'))
+        if my_data.get('num_vectors_per_token'):
+            print(message.format('TI'))
+        my_data['save_model_as'] = 'safetensors'
+
     return my_data
 
 
@@ -70,61 +107,71 @@ def get_dir_and_file(file_path):
     return (dir_path, file_name)
 
 
-def has_ext_files(directory, extension):
-    # Iterate through all the files in the directory
-    for file in os.listdir(directory):
-        # If the file name ends with extension, return True
-        if file.endswith(extension):
-            return True
-    # If no extension files were found, return False
-    return False
+# def has_ext_files(directory, extension):
+#     # Iterate through all the files in the directory
+#     for file in os.listdir(directory):
+#         # If the file name ends with extension, return True
+#         if file.endswith(extension):
+#             return True
+#     # If no extension files were found, return False
+#     return False
 
 
 def get_file_path(
-    file_path='', defaultextension='.json', extension_name='Config files'
+    file_path='', default_extension='.json', extension_name='Config files'
 ):
-    current_file_path = file_path
-    # print(f'current file path: {current_file_path}')
+    if not any(var in os.environ for var in FILE_ENV_EXCLUSION):
+        current_file_path = file_path
+        # print(f'current file path: {current_file_path}')
 
-    initial_dir, initial_file = get_dir_and_file(file_path)
+        initial_dir, initial_file = get_dir_and_file(file_path)
 
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        filetypes=(
-            (f'{extension_name}', f'{defaultextension}'),
-            ('All files', '*'),
-        ),
-        defaultextension=defaultextension,
-        initialfile=initial_file,
-        initialdir=initial_dir,
-    )
-    root.destroy()
+        # Create a hidden Tkinter root window
+        root = Tk()
+        root.wm_attributes('-topmost', 1)
+        root.withdraw()
 
-    if file_path == '':
-        file_path = current_file_path
+        # Show the open file dialog and get the selected file path
+        file_path = filedialog.askopenfilename(
+            filetypes=(
+                (extension_name, f'*{default_extension}'),
+                ('All files', '*.*'),
+            ),
+            defaultextension=default_extension,
+            initialfile=initial_file,
+            initialdir=initial_dir,
+        )
+
+        # Destroy the hidden root window
+        root.destroy()
+
+        # If no file is selected, use the current file path
+        if not file_path:
+            file_path = current_file_path
+        current_file_path = file_path
+        # print(f'current file path: {current_file_path}')
 
     return file_path
 
 
 def get_any_file_path(file_path=''):
-    current_file_path = file_path
-    # print(f'current file path: {current_file_path}')
+    if not any(var in os.environ for var in FILE_ENV_EXCLUSION):
+        current_file_path = file_path
+        # print(f'current file path: {current_file_path}')
 
-    initial_dir, initial_file = get_dir_and_file(file_path)
+        initial_dir, initial_file = get_dir_and_file(file_path)
 
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        initialdir=initial_dir,
-        initialfile=initial_file,
-    )
-    root.destroy()
+        root = Tk()
+        root.wm_attributes('-topmost', 1)
+        root.withdraw()
+        file_path = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            initialfile=initial_file,
+        )
+        root.destroy()
 
-    if file_path == '':
-        file_path = current_file_path
+        if file_path == '':
+            file_path = current_file_path
 
     return file_path
 
@@ -150,18 +197,19 @@ def remove_doublequote(file_path):
 
 
 def get_folder_path(folder_path=''):
-    current_folder_path = folder_path
+    if not any(var in os.environ for var in FILE_ENV_EXCLUSION):
+        current_folder_path = folder_path
 
-    initial_dir, initial_file = get_dir_and_file(folder_path)
+        initial_dir, initial_file = get_dir_and_file(folder_path)
 
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.withdraw()
-    folder_path = filedialog.askdirectory(initialdir=initial_dir)
-    root.destroy()
+        root = Tk()
+        root.wm_attributes('-topmost', 1)
+        root.withdraw()
+        folder_path = filedialog.askdirectory(initialdir=initial_dir)
+        root.destroy()
 
-    if folder_path == '':
-        folder_path = current_folder_path
+        if folder_path == '':
+            folder_path = current_folder_path
 
     return folder_path
 
@@ -169,34 +217,35 @@ def get_folder_path(folder_path=''):
 def get_saveasfile_path(
     file_path='', defaultextension='.json', extension_name='Config files'
 ):
-    current_file_path = file_path
-    # print(f'current file path: {current_file_path}')
+    if not any(var in os.environ for var in FILE_ENV_EXCLUSION):
+        current_file_path = file_path
+        # print(f'current file path: {current_file_path}')
 
-    initial_dir, initial_file = get_dir_and_file(file_path)
+        initial_dir, initial_file = get_dir_and_file(file_path)
 
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.withdraw()
-    save_file_path = filedialog.asksaveasfile(
-        filetypes=(
-            (f'{extension_name}', f'{defaultextension}'),
-            ('All files', '*'),
-        ),
-        defaultextension=defaultextension,
-        initialdir=initial_dir,
-        initialfile=initial_file,
-    )
-    root.destroy()
+        root = Tk()
+        root.wm_attributes('-topmost', 1)
+        root.withdraw()
+        save_file_path = filedialog.asksaveasfile(
+            filetypes=(
+                (f'{extension_name}', f'{defaultextension}'),
+                ('All files', '*'),
+            ),
+            defaultextension=defaultextension,
+            initialdir=initial_dir,
+            initialfile=initial_file,
+        )
+        root.destroy()
 
-    # print(save_file_path)
+        # print(save_file_path)
 
-    if save_file_path == None:
-        file_path = current_file_path
-    else:
-        print(save_file_path.name)
-        file_path = save_file_path.name
+        if save_file_path == None:
+            file_path = current_file_path
+        else:
+            print(save_file_path.name)
+            file_path = save_file_path.name
 
-    # print(file_path)
+        # print(file_path)
 
     return file_path
 
@@ -204,78 +253,135 @@ def get_saveasfile_path(
 def get_saveasfilename_path(
     file_path='', extensions='*', extension_name='Config files'
 ):
-    current_file_path = file_path
-    # print(f'current file path: {current_file_path}')
+    if not any(var in os.environ for var in FILE_ENV_EXCLUSION):
+        current_file_path = file_path
+        # print(f'current file path: {current_file_path}')
 
-    initial_dir, initial_file = get_dir_and_file(file_path)
+        initial_dir, initial_file = get_dir_and_file(file_path)
 
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.withdraw()
-    save_file_path = filedialog.asksaveasfilename(
-        filetypes=((f'{extension_name}', f'{extensions}'), ('All files', '*')),
-        defaultextension=extensions,
-        initialdir=initial_dir,
-        initialfile=initial_file,
-    )
-    root.destroy()
+        root = Tk()
+        root.wm_attributes('-topmost', 1)
+        root.withdraw()
+        save_file_path = filedialog.asksaveasfilename(
+            filetypes=((f'{extension_name}', f'{extensions}'), ('All files', '*')),
+            defaultextension=extensions,
+            initialdir=initial_dir,
+            initialfile=initial_file,
+        )
+        root.destroy()
 
-    if save_file_path == '':
-        file_path = current_file_path
-    else:
-        # print(save_file_path)
-        file_path = save_file_path
+        if save_file_path == '':
+            file_path = current_file_path
+        else:
+            # print(save_file_path)
+            file_path = save_file_path
 
     return file_path
 
 
 def add_pre_postfix(
-    folder='', prefix='', postfix='', caption_file_ext='.caption'
-):
-    if not has_ext_files(folder, caption_file_ext):
-        msgbox(
-            f'No files with extension {caption_file_ext} were found in {folder}...'
-        )
-        return
+    folder: str = '',
+    prefix: str = '',
+    postfix: str = '',
+    caption_file_ext: str = '.caption',
+) -> None:
+    """
+    Add prefix and/or postfix to the content of caption files within a folder.
+    If no caption files are found, create one with the requested prefix and/or postfix.
+
+    Args:
+        folder (str): Path to the folder containing caption files.
+        prefix (str, optional): Prefix to add to the content of the caption files.
+        postfix (str, optional): Postfix to add to the content of the caption files.
+        caption_file_ext (str, optional): Extension of the caption files.
+    """
 
     if prefix == '' and postfix == '':
         return
 
-    files = [f for f in os.listdir(folder) if f.endswith(caption_file_ext)]
-    if not prefix == '':
-        prefix = f'{prefix} '
-    if not postfix == '':
-        postfix = f' {postfix}'
+    image_extensions = ('.jpg', '.jpeg', '.png', '.webp')
+    image_files = [
+        f for f in os.listdir(folder) if f.lower().endswith(image_extensions)
+    ]
 
-    for file in files:
-        with open(os.path.join(folder, file), 'r+') as f:
-            content = f.read()
-            content = content.rstrip()
-            f.seek(0, 0)
-            f.write(f'{prefix}{content}{postfix}')
-    f.close()
+    for image_file in image_files:
+        caption_file_name = os.path.splitext(image_file)[0] + caption_file_ext
+        caption_file_path = os.path.join(folder, caption_file_name)
+
+        if not os.path.exists(caption_file_path):
+            with open(caption_file_path, 'w') as f:
+                separator = ' ' if prefix and postfix else ''
+                f.write(f'{prefix}{separator}{postfix}')
+        else:
+            with open(caption_file_path, 'r+') as f:
+                content = f.read()
+                content = content.rstrip()
+                f.seek(0, 0)
+
+                prefix_separator = ' ' if prefix else ''
+                postfix_separator = ' ' if postfix else ''
+                f.write(
+                    f'{prefix}{prefix_separator}{content}{postfix_separator}{postfix}'
+                )
 
 
-def find_replace(folder='', caption_file_ext='.caption', find='', replace=''):
+def has_ext_files(folder_path: str, file_extension: str) -> bool:
+    """
+    Check if there are any files with the specified extension in the given folder.
+
+    Args:
+        folder_path (str): Path to the folder containing files.
+        file_extension (str): Extension of the files to look for.
+
+    Returns:
+        bool: True if files with the specified extension are found, False otherwise.
+    """
+    for file in os.listdir(folder_path):
+        if file.endswith(file_extension):
+            return True
+    return False
+
+
+def find_replace(
+    folder_path: str = '',
+    caption_file_ext: str = '.caption',
+    search_text: str = '',
+    replace_text: str = '',
+) -> None:
+    """
+    Find and replace text in caption files within a folder.
+
+    Args:
+        folder_path (str, optional): Path to the folder containing caption files.
+        caption_file_ext (str, optional): Extension of the caption files.
+        search_text (str, optional): Text to search for in the caption files.
+        replace_text (str, optional): Text to replace the search text with.
+    """
     print('Running caption find/replace')
-    if not has_ext_files(folder, caption_file_ext):
+
+    if not has_ext_files(folder_path, caption_file_ext):
         msgbox(
-            f'No files with extension {caption_file_ext} were found in {folder}...'
+            f'No files with extension {caption_file_ext} were found in {folder_path}...'
         )
         return
 
-    if find == '':
+    if search_text == '':
         return
 
-    files = [f for f in os.listdir(folder) if f.endswith(caption_file_ext)]
-    for file in files:
-        with open(os.path.join(folder, file), 'r', errors='ignore') as f:
+    caption_files = [
+        f for f in os.listdir(folder_path) if f.endswith(caption_file_ext)
+    ]
+
+    for caption_file in caption_files:
+        with open(
+            os.path.join(folder_path, caption_file), 'r', errors='ignore'
+        ) as f:
             content = f.read()
-            f.close
-        content = content.replace(find, replace)
-        with open(os.path.join(folder, file), 'w') as f:
+
+        content = content.replace(search_text, replace_text)
+
+        with open(os.path.join(folder_path, caption_file), 'w') as f:
             f.write(content)
-            f.close()
 
 
 def color_aug_changed(color_aug):
@@ -348,17 +454,15 @@ def set_pretrained_model_name_or_path_input(
         if (
             str(pretrained_model_name_or_path) in V1_MODELS
             or str(pretrained_model_name_or_path) in V2_BASE_MODELS
-            or str(pretrained_model_name_or_path)
-            in V_PARAMETERIZATION_MODELS
+            or str(pretrained_model_name_or_path) in V_PARAMETERIZATION_MODELS
         ):
             pretrained_model_name_or_path = ''
             v2 = False
             v_parameterization = False
     return model_list, pretrained_model_name_or_path, v2, v_parameterization
 
-def set_v2_checkbox(
-    model_list, v2, v_parameterization
-):
+
+def set_v2_checkbox(model_list, v2, v_parameterization):
     # check if $v2 and $v_parameterization are empty and if $pretrained_model_name_or_path contains any of the substrings in the v2 list
     if str(model_list) in V2_BASE_MODELS:
         v2 = True
@@ -375,6 +479,7 @@ def set_v2_checkbox(
 
     return v2, v_parameterization
 
+
 def set_model_list(
     model_list,
     pretrained_model_name_or_path,
@@ -386,7 +491,7 @@ def set_model_list(
         model_list = 'custom'
     else:
         model_list = pretrained_model_name_or_path
-        
+
     return model_list, v2, v_parameterization
 
 
@@ -409,7 +514,11 @@ def gradio_config():
                 interactive=True,
             )
             button_load_config = gr.Button('Load 💾', elem_id='open_folder')
-            config_file_name.change(remove_doublequote, inputs=[config_file_name], outputs=[config_file_name])
+            config_file_name.change(
+                remove_doublequote,
+                inputs=[config_file_name],
+                outputs=[config_file_name],
+            )
     return (
         button_open_config,
         button_save_config,
@@ -428,7 +537,13 @@ def get_pretrained_model_name_or_path_file(
     set_model_list(model_list, pretrained_model_name_or_path)
 
 
-def gradio_source_model():
+def gradio_source_model(save_model_as_choices = [
+                    'same as source model',
+                    'ckpt',
+                    'diffusers',
+                    'diffusers_safetensors',
+                    'safetensors',
+                ]):
     with gr.Tab('Source model'):
         # Define the input elements
         with gr.Row():
@@ -470,13 +585,7 @@ def gradio_source_model():
             )
             save_model_as = gr.Dropdown(
                 label='Save trained model as',
-                choices=[
-                    'same as source model',
-                    'ckpt',
-                    'diffusers',
-                    'diffusers_safetensors',
-                    'safetensors',
-                ],
+                choices=save_model_as_choices,
                 value='safetensors',
             )
 
@@ -485,8 +594,18 @@ def gradio_source_model():
             v_parameterization = gr.Checkbox(
                 label='v_parameterization', value=False
             )
-            v2.change(set_v2_checkbox, inputs=[model_list, v2, v_parameterization], outputs=[v2, v_parameterization],show_progress=False)
-            v_parameterization.change(set_v2_checkbox, inputs=[model_list, v2, v_parameterization], outputs=[v2, v_parameterization],show_progress=False)
+            v2.change(
+                set_v2_checkbox,
+                inputs=[model_list, v2, v_parameterization],
+                outputs=[v2, v_parameterization],
+                show_progress=False,
+            )
+            v_parameterization.change(
+                set_v2_checkbox,
+                inputs=[model_list, v2, v_parameterization],
+                outputs=[v2, v_parameterization],
+                show_progress=False,
+            )
         model_list.change(
             set_pretrained_model_name_or_path_input,
             inputs=[
@@ -542,7 +661,9 @@ def gradio_training(
             step=1,
         )
         epoch = gr.Number(label='Epoch', value=1, precision=0)
-        save_every_n_epochs = gr.Number(label='Save every N epochs', value=1, precision=0)
+        save_every_n_epochs = gr.Number(
+            label='Save every N epochs', value=1, precision=0
+        )
         caption_extension = gr.Textbox(
             label='Caption Extension',
             placeholder='(Optional) Extension for caption files. default: .caption',
@@ -659,7 +780,7 @@ def run_cmd_training(**kwargs):
         if kwargs.get('save_precision')
         else '',
         f' --seed="{kwargs.get("seed", "")}"'
-        if kwargs.get('seed') != ""
+        if kwargs.get('seed') != ''
         else '',
         f' --caption_extension="{kwargs.get("caption_extension", "")}"'
         if kwargs.get('caption_extension')
@@ -678,7 +799,7 @@ def run_cmd_training(**kwargs):
 def gradio_advanced_training():
     with gr.Row():
         additional_parameters = gr.Textbox(
-            label='Additional parameters', 
+            label='Additional parameters',
             placeholder='(Optional) Use to provide additional parameters not handled by the GUI. Eg: --some_parameters "value"',
         )
     with gr.Row():
@@ -719,6 +840,7 @@ def gradio_advanced_training():
         xformers = gr.Checkbox(label='Use xformers', value=True)
         color_aug = gr.Checkbox(label='Color augmentation', value=False)
         flip_aug = gr.Checkbox(label='Flip augmentation', value=False)
+        min_snr_gamma = gr.Slider(label='Min SNR gamma', value = 0, minimum=0, maximum=20, step=1)
     with gr.Row():
         bucket_no_upscale = gr.Checkbox(
             label="Don't upscale bucket resolution", value=True
@@ -740,6 +862,13 @@ def gradio_advanced_training():
         caption_dropout_rate = gr.Slider(
             label='Rate of caption dropout', value=0, minimum=0, maximum=1
         )
+        vae_batch_size = gr.Slider(
+            label='VAE batch size',
+            minimum=0,
+            maximum=32,
+            value=0,
+            every=1
+        )
     with gr.Row():
         save_state = gr.Checkbox(label='Save training state', value=False)
         resume = gr.Textbox(
@@ -759,6 +888,7 @@ def gradio_advanced_training():
         max_data_loader_n_workers = gr.Textbox(
             label='Max num workers for DataLoader',
             placeholder='(Optional) Override number of epoch. Default: 8',
+            value="0",
         )
     return (
         # use_8bit_adam,
@@ -784,6 +914,8 @@ def gradio_advanced_training():
         caption_dropout_rate,
         noise_offset,
         additional_parameters,
+        vae_batch_size,
+        min_snr_gamma,
     )
 
 
@@ -810,19 +942,24 @@ def run_cmd_advanced_training(**kwargs):
         f' --caption_dropout_every_n_epochs="{int(kwargs.get("caption_dropout_every_n_epochs", 0))}"'
         if int(kwargs.get('caption_dropout_every_n_epochs', 0)) > 0
         else '',
-        f' --caption_dropout_rate="{kwargs.get("caption_dropout_rate", "")}"'
-        if float(kwargs.get('caption_dropout_rate', 0)) > 0
+        f' --caption_dropout_every_n_epochs="{int(kwargs.get("caption_dropout_every_n_epochs", 0))}"'
+        if int(kwargs.get('caption_dropout_every_n_epochs', 0)) > 0
+        else '',
+        f' --vae_batch_size="{kwargs.get("vae_batch_size", 0)}"'
+        if int(kwargs.get('vae_batch_size', 0)) > 0
         else '',
         f' --bucket_reso_steps={int(kwargs.get("bucket_reso_steps", 1))}'
         if int(kwargs.get('bucket_reso_steps', 64)) >= 1
+        else '',
+        f' --min_snr_gamma={int(kwargs.get("min_snr_gamma", 0))}'
+        if int(kwargs.get('min_snr_gamma', 0)) >= 1
         else '',
         ' --save_state' if kwargs.get('save_state') else '',
         ' --mem_eff_attn' if kwargs.get('mem_eff_attn') else '',
         ' --color_aug' if kwargs.get('color_aug') else '',
         ' --flip_aug' if kwargs.get('flip_aug') else '',
         ' --shuffle_caption' if kwargs.get('shuffle_caption') else '',
-        ' --gradient_checkpointing'
-        if kwargs.get('gradient_checkpointing')
+        ' --gradient_checkpointing' if kwargs.get('gradient_checkpointing')
         else '',
         ' --full_fp16' if kwargs.get('full_fp16') else '',
         ' --xformers' if kwargs.get('xformers') else '',
@@ -835,7 +972,7 @@ def run_cmd_advanced_training(**kwargs):
         f' --noise_offset={float(kwargs.get("noise_offset", 0))}'
         if not kwargs.get('noise_offset', '') == ''
         else '',
-        f' {kwargs.get("additional_parameters", "")}'
+        f' {kwargs.get("additional_parameters", "")}',
     ]
     run_cmd = ''.join(options)
     return run_cmd

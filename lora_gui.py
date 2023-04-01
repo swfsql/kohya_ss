@@ -4,6 +4,7 @@
 # v3.1: Adding captionning of images to utilities
 
 import gradio as gr
+import easygui
 import json
 import math
 import os
@@ -26,6 +27,7 @@ from library.common_gui import (
     run_cmd_training,
     # set_legacy_8bitadam,
     update_my_data,
+    check_if_model_exist,
 )
 from library.dreambooth_folder_creation_gui import (
     gradio_dreambooth_folder_creation_tab,
@@ -120,7 +122,10 @@ def save_configuration(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -236,15 +241,18 @@ def open_configuration(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
-    
+
     ask_for_file = True if ask_for_file.get('label') == 'True' else False
 
     original_file_path = file_path
-    
+
     if ask_for_file:
         file_path = get_file_path(file_path)
 
@@ -253,7 +261,8 @@ def open_configuration(
         with open(file_path, 'r') as f:
             my_data = json.load(f)
             print('Loading config...')
-            # Update values to fix deprecated use_8bit_adam checkbox and set appropriate optimizer if it is set to True
+
+            # Update values to fix deprecated use_8bit_adam checkbox, set appropriate optimizer if it is set to True, etc.
             my_data = update_my_data(my_data)
     else:
         file_path = original_file_path  # In case a file_path was provided and the user decide to cancel the open action
@@ -342,10 +351,13 @@ def train_model(
     sample_every_n_steps,
     sample_every_n_epochs,
     sample_sampler,
-    sample_prompts,additional_parameters,
+    sample_prompts,
+    additional_parameters,
+    vae_batch_size,
+    min_snr_gamma,
 ):
     print_only_bool = True if print_only.get('label') == 'True' else False
-    
+
     if pretrained_model_name_or_path == '':
         msgbox('Source model information is missing')
         return
@@ -380,6 +392,9 @@ def train_model(
         )
         stop_text_encoder_training_pct = 0
 
+    if check_if_model_exist(output_name, output_dir, save_model_as):
+        return
+
     # If string is empty set string to 0.
     if text_encoder_lr == '':
         text_encoder_lr = 0
@@ -410,20 +425,25 @@ def train_model(
         num_images = len(
             [
                 f
-                for f in os.listdir(os.path.join(train_data_dir, folder))
-                if f.endswith('.jpg')
-                or f.endswith('.jpeg')
-                or f.endswith('.png')
-                or f.endswith('.webp')
+                for f, lower_f in (
+                    (file, file.lower())
+                    for file in os.listdir(
+                        os.path.join(train_data_dir, folder)
+                    )
+                )
+                if lower_f.endswith(('.jpg', '.jpeg', '.png', '.webp'))
             ]
         )
 
+        print(f'Folder {folder}: {num_images} images found')
+
         # Calculate the total number of steps for this folder
         steps = repeats * num_images
-        total_steps += steps
 
         # Print the result
         print(f'Folder {folder}: {steps} steps')
+
+        total_steps += steps
 
     # calculate max_train_steps
     max_train_steps = int(
@@ -490,9 +510,7 @@ def train_model(
             )
             return
         run_cmd += f' --network_module=lycoris.kohya'
-        run_cmd += (
-            f' --network_args "conv_dim={conv_dim}" "conv_alpha={conv_alpha}" "algo=lora"'
-        )
+        run_cmd += f' --network_args "conv_dim={conv_dim}" "conv_alpha={conv_alpha}" "algo=lora"'
     if LoRA_type == 'LyCORIS/LoHa':
         try:
             import lycoris
@@ -502,9 +520,7 @@ def train_model(
             )
             return
         run_cmd += f' --network_module=lycoris.kohya'
-        run_cmd += (
-            f' --network_args "conv_dim={conv_dim}" "conv_alpha={conv_alpha}" "algo=loha"'
-        )
+        run_cmd += f' --network_args "conv_dim={conv_dim}" "conv_alpha={conv_alpha}" "algo=loha"'
     if LoRA_type == 'Kohya LoCon':
         run_cmd += f' --network_module=networks.lora'
         run_cmd += (
@@ -583,6 +599,8 @@ def train_model(
         caption_dropout_rate=caption_dropout_rate,
         noise_offset=noise_offset,
         additional_parameters=additional_parameters,
+        vae_batch_size=vae_batch_size,
+        min_snr_gamma=min_snr_gamma,
     )
 
     run_cmd += run_cmd_sample(
@@ -593,8 +611,10 @@ def train_model(
         output_dir,
     )
 
-    if  print_only_bool:
-        print('\033[93m\nHere is the trainer command as a reference. It will not be executed:\033[0m\n')
+    if print_only_bool:
+        print(
+            '\033[93m\nHere is the trainer command as a reference. It will not be executed:\033[0m\n'
+        )
         print('\033[96m' + run_cmd + '\033[0m\n')
     else:
         print(run_cmd)
@@ -609,7 +629,9 @@ def train_model(
 
         if not last_dir.is_dir():
             # Copy inference model for v2 if required
-            save_inference_file(output_dir, v2, v_parameterization, output_name)
+            save_inference_file(
+                output_dir, v2, v_parameterization, output_name
+            )
 
 
 def lora_tab(
@@ -637,7 +659,12 @@ def lora_tab(
         v_parameterization,
         save_model_as,
         model_list,
-    ) = gradio_source_model()
+    ) = gradio_source_model(
+        save_model_as_choices=[
+            'ckpt',
+            'safetensors',
+        ]
+    )
 
     with gr.Tab('Folders'):
         with gr.Row():
@@ -781,11 +808,11 @@ def lora_tab(
                 interactive=True,
             )
             network_alpha = gr.Slider(
-                minimum=1,
+                minimum=0.1,
                 maximum=1024,
                 label='Network Alpha',
                 value=1,
-                step=1,
+                step=0.1,
                 interactive=True,
             )
 
@@ -800,16 +827,21 @@ def lora_tab(
                 label='Convolution Rank (Dimension)',
             )
             conv_alpha = gr.Slider(
-                minimum=1,
+                minimum=0.1,
                 maximum=512,
                 value=1,
-                step=1,
+                step=0.1,
                 label='Convolution Alpha',
             )
         # Show of hide LoCon conv settings depending on LoRA type selection
         def LoRA_type_change(LoRA_type):
             print('LoRA type changed...')
-            if LoRA_type == 'LoCon' or LoRA_type == 'Kohya LoCon' or LoRA_type == 'LyCORIS/LoHa' or LoRA_type == 'LyCORIS/LoCon':
+            if (
+                LoRA_type == 'LoCon'
+                or LoRA_type == 'Kohya LoCon'
+                or LoRA_type == 'LyCORIS/LoHa'
+                or LoRA_type == 'LyCORIS/LoCon'
+            ):
                 return gr.Group.update(visible=True)
             else:
                 return gr.Group.update(visible=False)
@@ -874,7 +906,10 @@ def lora_tab(
                 bucket_reso_steps,
                 caption_dropout_every_n_epochs,
                 caption_dropout_rate,
-                noise_offset,additional_parameters,
+                noise_offset,
+                additional_parameters,
+                vae_batch_size,
+                min_snr_gamma,
             ) = gradio_advanced_training()
             color_aug.change(
                 color_aug_changed,
@@ -990,7 +1025,10 @@ def lora_tab(
         sample_every_n_steps,
         sample_every_n_epochs,
         sample_sampler,
-        sample_prompts,additional_parameters,
+        sample_prompts,
+        additional_parameters,
+        vae_batch_size,
+        min_snr_gamma,
     ]
 
     button_open_config.click(
@@ -1079,6 +1117,8 @@ def UI(**kwargs):
         launch_kwargs['server_port'] = kwargs.get('server_port', 0)
     if kwargs.get('inbrowser', False):
         launch_kwargs['inbrowser'] = kwargs.get('inbrowser', False)
+    if kwargs.get('listen', True):
+        launch_kwargs['server_name'] = '0.0.0.0'
     print(launch_kwargs)
     interface.launch(**launch_kwargs)
 
@@ -1100,6 +1140,11 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--inbrowser', action='store_true', help='Open in browser'
+    )
+    parser.add_argument(
+        '--listen',
+        action='store_true',
+        help='Launch gradio with server name 0.0.0.0, allowing LAN access',
     )
 
     args = parser.parse_args()

@@ -11,10 +11,11 @@ from tensorflow.keras.models import load_model
 from huggingface_hub import hf_hub_download
 import torch
 
-import library.train_util as train_util
+# import library.train_util as train_util
 
 # from wd14 tagger
 IMAGE_SIZE = 448
+IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".PNG", ".JPG", ".JPEG", ".WEBP", ".BMP"]
 
 # wd-v1-4-swinv2-tagger-v2 / wd-v1-4-vit-tagger / wd-v1-4-vit-tagger-v2/ wd-v1-4-convnext-tagger / wd-v1-4-convnext-tagger-v2
 DEFAULT_WD14_TAGGER_REPO = 'SmilingWolf/wd-v1-4-convnext-tagger-v2'
@@ -23,6 +24,16 @@ SUB_DIR = "variables"
 SUB_DIR_FILES = ["variables.data-00000-of-00001", "variables.index"]
 CSV_FILE = FILES[-1]
 
+def glob_images(directory, base="*"):
+    img_paths = []
+    for ext in IMAGE_EXTENSIONS:
+        if base == "*":
+            img_paths.extend(glob.glob(os.path.join(glob.escape(directory), base + ext)))
+        else:
+            img_paths.extend(glob.glob(glob.escape(os.path.join(directory, base + ext))))
+    img_paths = list(set(img_paths))  # 重複を排除
+    img_paths.sort()
+    return img_paths
 
 def preprocess_image(image):
   image = np.array(image)
@@ -89,7 +100,7 @@ def main(args):
     print("using existing wd14 tagger model")
 
   # 画像を読み込む
-  image_paths = train_util.glob_images(args.train_data_dir)
+  image_paths = glob_images(args.train_data_dir)
   print(f"found {len(image_paths)} images.")
 
   print("loading model and labels")
